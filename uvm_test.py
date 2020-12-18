@@ -54,7 +54,7 @@ def main():
     args = get_args()
     prefetch_stream = torch.cuda.Stream() 
 
-    model = GPT2LM(embed_dim=768, num_heads=12, num_layers=12).train().cuda()
+    #model = GPT2LM(embed_dim=768, num_heads=12, num_layers=12).train().cuda()
     #model = GPT2LM().cuda()
     #model = PrefetchGPT2LM(embed_dim=768, num_heads=12, num_layers=12, prefetch_stream=prefetch_stream).eval().cuda()
     #model = PrefetchGPT2LM().train().cuda()
