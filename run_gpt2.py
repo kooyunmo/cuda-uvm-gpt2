@@ -54,6 +54,7 @@ def get_args():
                         help='whether to enable prefetch optimization')
     parser.add_argument('--enable-cudnn-benchmark', action='store_true',
                         help='whether to enable cudnn benchmark option')
+    parser.add_argument('--warmups', type=int, default=3, help='# of warm up steps')
     return parser.parse_args()
 
 
@@ -76,18 +77,21 @@ def main():
     else:
         model = GPT2LM(**model_config).eval().cuda()
 
-    synthetic_dataset = MockDataset(5)
+    num_warmup = args.warmups
+    synthetic_dataset = MockDataset(5 + num_warmup)
     dataloader = DataLoader(synthetic_dataset, batch_size=1, shuffle=False)
 
     fw_times = []
-    for inp in tqdm(dataloader):
-        # TODO: eval with no_grad
-        with torch.no_grad(), event_measure() as result:
+    for step, inp in enumerate(tqdm(dataloader)):
+        if step < num_warmup:
             out = model(inp.cuda())
-        fw_times.append(result['time'])
+        else:
+            with torch.no_grad(), event_measure() as result:
+                out = model(inp.cuda())
+            fw_times.append(result['time'])
 
     avg_fw_time = np.mean(fw_times)
-    print(f"avg step time: {avg_fw_time} ms")
+    print(f"Avg. step time: {avg_fw_time} ms")
 
 
 if __name__ == '__main__':
