@@ -19,13 +19,13 @@ class Conv1D(nn.Module):
         return x
 
 
-class GELU_New(nn.Module):
+class GELU(nn.Module):
     def forward(self, x):
         """Excerpt from "src/transformers/activations.py" in "transformers" module."""
         return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0))))
     
 
-class HFAttention(nn.Module):
+class Attention(nn.Module):
     def __init__(self, nx, n_ctx, n_head, pdrop=0.1):
         super().__init__()
         n_state = nx
@@ -82,11 +82,11 @@ class Block(nn.Module):
     def __init__(self, embed_dim, num_heads, num_positions, pdrop=0.1):
         super(Block, self).__init__()
         self.ln_1 = nn.LayerNorm(embed_dim)
-        self.attn = HFAttention(embed_dim, num_positions, num_heads, pdrop=pdrop)
+        self.attn = Attention(embed_dim, num_positions, num_heads, pdrop=pdrop)
         self.ln_2 = nn.LayerNorm(embed_dim)
         self.mlp = nn.Sequential(
             Conv1D(embed_dim * 4, embed_dim),
-            GELU_New(),
+            GELU(),
             Conv1D(embed_dim, embed_dim * 4),
             nn.Dropout(p=pdrop, inplace=False),
         )

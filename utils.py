@@ -14,13 +14,3 @@ def event_measure():
         end_event.record()
         end_event.synchronize()
         result["time"] = start_event.elapsed_time(end_event)
-
-@contextmanager
-def prefetch_async():
-    result = {}
-    torch._C._cuda_enablePrefetchRecording()
-    try:
-        yield result
-    finally:
-        result['num_blocks'] = torch._C._cuda_disablePrefetchRecording()
-

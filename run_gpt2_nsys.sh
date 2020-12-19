@@ -2,4 +2,4 @@ nsys profile \
   --trace=cublas,cuda,cudnn,nvtx,osrt \
   -o ./nsys/test_small.output \
   -f true \
-  python uvm_test.py
+  python run_gpt2.py

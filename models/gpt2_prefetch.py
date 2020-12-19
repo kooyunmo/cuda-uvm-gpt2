@@ -2,11 +2,9 @@ import torch
 import math
 import torch.nn as nn
 from torch import ops
-from utils import prefetch_async
+from prefetch import Prefetcher
 
 #torch.ops.load_library("../workspace/private/ym-pytorch/custom_ops/uvm/build/libcuda_mem_prefetch_async.so")
-num_prefetch_blocks_list = []
-current_prefetch_idx = 0
 
 class Conv1D(nn.Module):
     def __init__(self, nf, nx):
@@ -24,12 +22,12 @@ class Conv1D(nn.Module):
         return x
 
 
-class GELU_New(nn.Module):
+class GELU(nn.Module):
     def forward(self, x):
         return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0))))
     
 
-class HFAttention(nn.Module):
+class Attention(nn.Module):
     def __init__(self, nx, n_ctx, n_head, pdrop=0.1):
         super().__init__()
         n_state = nx
@@ -83,21 +81,39 @@ class HFAttention(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, embed_dim, num_heads, num_positions, pdrop=0.1):
+    def __init__(self, prefetcher, embed_dim, num_heads, num_positions, pdrop=0.1):
         super(Block, self).__init__()
-        self.ln_1 = nn.LayerNorm(embed_dim)
-        self.attn = HFAttention(embed_dim, num_positions, num_heads, pdrop=pdrop)
-        self.ln_2 = nn.LayerNorm(embed_dim)
-        self.mlp = nn.Sequential(
-            Conv1D(embed_dim * 4, embed_dim),
-            GELU_New(),
-            Conv1D(embed_dim, embed_dim * 4),
-            nn.Dropout(p=pdrop, inplace=False),
-        )
+
+        self.prefetcher = prefetcher
+
+        with self.prefetcher.record_malloc() as result:
+            self.ln_1 = nn.LayerNorm(embed_dim).cuda()
+        print(f"ln_1: {result['num_blocks']}")
+        
+        with self.prefetcher.record_malloc() as result:
+            self.attn = Attention(embed_dim, num_positions, num_heads, pdrop=pdrop).cuda()
+        print(f"attn: {result['num_blocks']}")
+        
+        with self.prefetcher.record_malloc() as result:
+            self.ln_2 = nn.LayerNorm(embed_dim).cuda()
+        print(f"ln_2: {result['num_blocks']}")
+        
+        with self.prefetcher.record_malloc() as result:
+            self.mlp = nn.Sequential(
+                Conv1D(embed_dim * 4, embed_dim),
+                GELU(),
+                Conv1D(embed_dim, embed_dim * 4),
+                nn.Dropout(p=pdrop, inplace=False),
+            ).cuda()
+        print(f"mlp: {result['num_blocks']}")
 
     def forward(self, x):
         hidden_states = x
+        
+        self.prefetcher.prefetch_async(2)
         hidden_states = hidden_states + self.attn(self.ln_1(x))
+       
+        self.prefetcher.prefetch_async(2)
         m = self.mlp(self.ln_2(hidden_states))
         hidden_states = hidden_states + m
 
@@ -107,16 +123,18 @@ class Block(nn.Module):
 class GPT2(nn.Module):
     def __init__(
         self,
+        prefetcher: Prefetcher,
         embed_dim: int = 1600,
         num_heads: int = 25,
         num_layers: int = 48,
         num_positions: int = 1024,
         vocab_size: int = 50257,
         pdrop: float = 0.1,
-        prefetch_stream: torch.cuda.Stream = None,
     ):
         super().__init__()
-        global num_prefetch_blocks_list
+
+        self.prefetcher = prefetcher
+
         # Hyperparameters
         self.embed_dim = embed_dim 
         self.num_heads = num_heads 
@@ -124,30 +142,35 @@ class GPT2(nn.Module):
         self.num_positions = num_positions 
         self.vocab_size = vocab_size 
         self.pdrop = pdrop
-        self.prefetch_stream = prefetch_stream
 
         # Embedding Layers
-        with prefetch_async() as result:
-            self.token_embeddings = nn.Embedding(self.vocab_size, self.embed_dim)
-        num_prefetch_blocks_list.append(result["num_blocks"])
+        with self.prefetcher.record_malloc() as result:
+            self.token_embeddings = nn.Embedding(self.vocab_size, self.embed_dim).cuda()
+        print(f"wte: {result['num_blocks']}")
 
-        self.position_embeddings = nn.Embedding(self.num_positions, self.embed_dim)
-        self.drop = nn.Dropout(self.pdrop)
+        with self.prefetcher.record_malloc() as result:
+            self.position_embeddings = nn.Embedding(self.num_positions, self.embed_dim).cuda()
+        print(f"pte: {result['num_blocks']}")
+
+        self.drop = nn.Dropout(self.pdrop).cuda()
 
         # Transformer Layers
         self.layers = nn.Sequential(*[
-            Block(self.embed_dim, self.num_heads, self.num_positions, pdrop=self.pdrop)
+            Block(self.prefetcher, self.embed_dim, self.num_heads, self.num_positions, pdrop=self.pdrop)
             for _ in range(self.num_layers)
         ])
-        self.ln_f = nn.LayerNorm(self.embed_dim)
+        
+        with self.prefetcher.record_malloc() as result:
+            self.ln_f = nn.LayerNorm(self.embed_dim).cuda()
+        print(f"ln_f: {result['num_blocks']}")
 
     def forward(self, x):
-        global num_prefetch_blocks_list, current_prefetch_idx
-        torch._C._cuda_memPrefetchAsync(self.prefetch_stream._cdata, num_prefetch_blocks_list[current_prefetch_idx % len(num_prefetch_blocks_list)])
         # 1. Get embeddings
         ## 1.1 get token embeddings
+        self.prefetcher.prefetch_async(1)
         h = self.token_embeddings(x.long())
         ## 1.2 Add positional embeddings
+        self.prefetcher.prefetch_async(1)
         seq_length = x.size(1)
         positions = torch.arange(0, seq_length, device=x.device).unsqueeze(0)
         h = h + self.position_embeddings(positions).expand_as(h)
@@ -156,6 +179,7 @@ class GPT2(nn.Module):
         # 2. Pass it through transformer layers
         h = self.layers(h)
         # 3. Apply the last layer norm
+        self.prefetcher.prefetch_async(1)
         h = self.ln_f(h)
         return h 
 
@@ -172,31 +196,35 @@ class PrefetchGPT2LM(nn.Module):
         prefetch_stream: torch.cuda.Stream = None,
     ):
         super().__init__()
-        global num_prefetch_blocks_list
+        self.prefetcher = Prefetcher(prefetch_stream=prefetch_stream)
+
         self.transformer = GPT2(
+            prefetcher=self.prefetcher,
             embed_dim=embed_dim,
             num_heads=num_heads,
             num_layers=num_layers,
             num_positions=num_positions,
             vocab_size=vocab_size,
-            pdrop=pdrop,
-            prefetch_stream=prefetch_stream,
+            pdrop=pdrop
         )
         # Logit Linear Layer
-        with prefetch_async() as result:
-            self.lm_head = nn.Linear(embed_dim, vocab_size, bias=False)
-        num_prefetch_blocks_list.append(result["num_blocks"])
-
+        with self.prefetcher.record_malloc() as result:
+            self.lm_head = nn.Linear(embed_dim, vocab_size, bias=False).cuda()
+        print(f"lm_head: {result['num_blocks']}")
+        
         for module in self.modules():
             self._init_weight(module)
 
         self.prefetch_stream = prefetch_stream
 
     def forward(self, x):
-        global num_prefetch_blocks_list, current_prefetch_idx
-        torch._C._cuda_memPrefetchAsync(self.prefetch_stream._cdata, num_prefetch_blocks_list[current_prefetch_idx % len(num_prefetch_blocks_list)])
+        #breakpoint()
         h = self.transformer(x)
-        return self.lm_head(h)
+        
+        self.prefetcher.prefetch_async(1)
+        logits = self.lm_head(h)
+
+        return logits
 
     def _init_weight(self, module):
         initializer_range = 0.02 # Default value of Huggingface GPT-2 Config
