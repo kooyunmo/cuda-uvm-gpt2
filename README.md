@@ -48,8 +48,13 @@ BUILD_TEST=0 USE_DISTRIBUTED=0 USE_NCCL=0 USE_NUMA=0 USE_MPI=0 python setup.py i
 
 ## Evaluate
 ``` bash
+# install requirements
+pip install -r requirements.txt
+
+# run inference
 CUDA_VISIBLE_DEVICES=<GPU_ID>
 python run_gpt2.py \
+    --model <MODEL_NAME> \
     --enable-prefetch \
     --enable-cudnn-benchmark
 ```
