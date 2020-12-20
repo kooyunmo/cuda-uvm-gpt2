@@ -1,8 +1,8 @@
 # cuda-uvm-gpt2
 
-This repo evaluates the performance of [UVM-PyTorch](https://github.com/kooyunmo/pytorch-uvm/tree/53e458826f1895ab92c7b31a1c66fa60c29f84cd) with extremely large-scale language models (e.g. GPT-2, GPT-3). UVM-PyTorch adopts CUDA unified virtual memory (a.k.a. UVM) to serve memory-intensive models with preventing the program execution from OOM by up to CPU memory capacity. UVM makes both CPU and GPU share the same virtual address space. Therefore, even though the GPU memory is physically oversubscribed (vanilla PyTorch occurs OOM in this case), victim memory block is implicitly migrated to CPU physical memory space without any explicit data off-loading command. The evicted data can be migrated to GPU memory again when it is on-demand.
+This repo evaluates the performance of [PyTorch-UVM](https://github.com/kooyunmo/pytorch-uvm/tree/53e458826f1895ab92c7b31a1c66fa60c29f84cd) with extremely large-scale language models (e.g. GPT-2, GPT-3). PyTorch-UVM adopts CUDA Unified Virtual Memory (a.k.a. UVM) to serve memory-intensive models with preventing the program execution from OOM by up to CPU memory capacity. UVM makes both CPU and GPU share the same virtual address space. Therefore, even though the GPU memory is physically oversubscribed (vanilla PyTorch occurs OOM in this case), victim memory block is implicitly migrated to CPU physical memory space without any explicit data off-loading command. The evicted data can be migrated to GPU memory again when it is on-demand.
 
-## How to Build UVM-PyTorch
+## How to Build PyTorch-UVM
 
 ### Prerequisites
 - Ubuntu 18.04
