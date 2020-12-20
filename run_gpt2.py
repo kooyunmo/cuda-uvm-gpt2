@@ -29,11 +29,11 @@ cfgs: Dict[str, Dict[str, int]] = {
 
 
 class MockDataset(Dataset):
-    def __init__(self, dsize):
+    def __init__(self, dsize, seq_len=1024):
         self.dsize = dsize
         self.data = []
         for i in range(dsize):
-            self.data.append(torch.randint(low=0, high=50256, size=(1024,)))
+            self.data.append(torch.randint(low=0, high=50256, size=(seq_len,)))
 
     def __len__(self):
         return len(self.data)
@@ -78,7 +78,8 @@ def main():
         model = GPT2LM(**model_config).eval().cuda()
 
     num_warmup = args.warmups
-    synthetic_dataset = MockDataset(5 + num_warmup)
+    SEQ_LEN = 1024
+    synthetic_dataset = MockDataset(5 + num_warmup, SEQ_LEN)
     dataloader = DataLoader(synthetic_dataset, batch_size=1, shuffle=False)
 
     fw_times = []
@@ -91,7 +92,8 @@ def main():
             fw_times.append(result['time'])
 
     avg_fw_time = np.mean(fw_times)
-    print(f"Avg. step time: {avg_fw_time} ms")
+    avg_throughput = SEQ_LEN / (avg_fw_time / 1000)
+    print(f"Avg. step time: {avg_fw_time} ms \tAvg. throughput: {avg_throughput} tokens/sec")
 
 
 if __name__ == '__main__':
