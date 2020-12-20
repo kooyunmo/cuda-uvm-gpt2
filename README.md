@@ -13,6 +13,7 @@ This repo evaluates the performance of [UVM-PyTorch](https://github.com/kooyunmo
 ``` bash
 git clone --recursive https://github.com/kooyunmo/cuda-uvm-gpt2
 cd cuda-uvm-gpt2/pytorch-uvm
+git checkout uvm
 
 # create new conda environment
 conda create -n uvm-pytorch python=3.8 -y
