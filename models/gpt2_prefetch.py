@@ -28,8 +28,11 @@ class GELU(nn.Module):
     
 
 class Attention(nn.Module):
-    def __init__(self, nx, n_ctx, n_head, pdrop=0.1):
+    def __init__(self, prefetcher, nx, n_ctx, n_head, pdrop=0.1):
         super().__init__()
+
+        self.prefetcher = prefetcher
+
         n_state = nx
         assert n_state % n_head == 0
 
@@ -39,8 +42,12 @@ class Attention(nn.Module):
         self.register_buffer("masked_bias", torch.tensor(-1e4))
         self.n_head = n_head
         self.split_size = n_state
-        self.c_attn = Conv1D(3 * n_state, nx)
-        self.c_proj = Conv1D(n_state, nx)
+        with self.prefetcher.record_malloc() as result:
+            self.c_attn = Conv1D(3 * n_state, nx).cuda()
+        print(f"c_attn: {result['num_blocks']}")
+        with self.prefetcher.record_malloc() as result:
+            self.c_proj = Conv1D(n_state, nx).cuda()
+        print(f"c_proj: {result['num_blocks']}")
         self.attn_dropout = nn.Dropout(pdrop)
         self.resid_dropout = nn.Dropout(pdrop)
 
@@ -71,10 +78,12 @@ class Attention(nn.Module):
             return x.permute(0, 2, 1, 3)  # (batch, head, seq_length, head_features)
 
     def forward(self, hidden_states):
+        self.prefetcher.prefetch_async(1)
         query, key, value = self.c_attn(hidden_states).split(self.split_size, dim=2)
         query, key, value = self.split_heads(query), self.split_heads(key, k=True), self.split_heads(value)
         a = self._attn(query, key, value)
         a = self.merge_heads(a)
+        self.prefetcher.prefetch_async(1)
         a = self.c_proj(a)
         a = self.resid_dropout(a)
         return a
@@ -90,9 +99,7 @@ class Block(nn.Module):
             self.ln_1 = nn.LayerNorm(embed_dim).cuda()
         print(f"ln_1: {result['num_blocks']}")
         
-        with self.prefetcher.record_malloc() as result:
-            self.attn = Attention(embed_dim, num_positions, num_heads, pdrop=pdrop).cuda()
-        print(f"attn: {result['num_blocks']}")
+        self.attn = Attention(prefetcher, embed_dim, num_positions, num_heads, pdrop=pdrop).cuda()
         
         with self.prefetcher.record_malloc() as result:
             self.ln_2 = nn.LayerNorm(embed_dim).cuda()
@@ -110,8 +117,9 @@ class Block(nn.Module):
     def forward(self, x):
         hidden_states = x
         
-        self.prefetcher.prefetch_async(2)
-        hidden_states = hidden_states + self.attn(self.ln_1(x))
+        self.prefetcher.prefetch_async(1)
+        ln_1_out = self.ln_1(x)
+        hidden_states = hidden_states + self.attn(ln_1_out)
        
         self.prefetcher.prefetch_async(2)
         m = self.mlp(self.ln_2(hidden_states))
