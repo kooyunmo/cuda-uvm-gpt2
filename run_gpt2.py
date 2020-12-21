@@ -54,7 +54,8 @@ def get_args():
                         help='whether to enable prefetch optimization')
     parser.add_argument('--enable-cudnn-benchmark', action='store_true',
                         help='whether to enable cudnn benchmark option')
-    parser.add_argument('--warmups', type=int, default=3, help='# of warm up steps')
+    parser.add_argument('--num-streams', type=int, default=3, help='# of prefetch streams')
+    parser.add_argument('--warmups', type=int, default=2, help='# of warm up steps')
     return parser.parse_args()
 
 
@@ -71,15 +72,14 @@ def main():
         torch.backends.cudnn.benchmark = True
     
     if args.enable_prefetch:
-        prefetch_stream = torch.cuda.Stream()
-        model_config['prefetch_stream'] = prefetch_stream
+        model_config['num_prefetch_streams'] = args.num_streams
         model = PrefetchGPT2LM(**model_config).eval().cuda()
     else:
         model = GPT2LM(**model_config).eval().cuda()
 
     num_warmup = args.warmups
     SEQ_LEN = 1024
-    synthetic_dataset = MockDataset(5 + num_warmup, SEQ_LEN)
+    synthetic_dataset = MockDataset(3 + num_warmup, SEQ_LEN)
     dataloader = DataLoader(synthetic_dataset, batch_size=1, shuffle=False)
 
     fw_times = []

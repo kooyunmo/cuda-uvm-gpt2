@@ -1,5 +1,7 @@
-import torch
+from typing import List
 import math
+
+import torch
 import torch.nn as nn
 from torch import ops
 from prefetch import Prefetcher
@@ -201,10 +203,10 @@ class PrefetchGPT2LM(nn.Module):
         num_positions: int = 1024,
         vocab_size: int = 50257,
         pdrop: float = 0.1,
-        prefetch_stream: torch.cuda.Stream = None,
+        num_prefetch_streams: int = 2,
     ):
         super().__init__()
-        self.prefetcher = Prefetcher(prefetch_stream=prefetch_stream)
+        self.prefetcher = Prefetcher(num_prefetch_streams=num_prefetch_streams)
 
         self.transformer = GPT2(
             prefetcher=self.prefetcher,
@@ -222,8 +224,6 @@ class PrefetchGPT2LM(nn.Module):
         
         for module in self.modules():
             self._init_weight(module)
-
-        self.prefetch_stream = prefetch_stream
 
     def forward(self, x):
         #breakpoint()
