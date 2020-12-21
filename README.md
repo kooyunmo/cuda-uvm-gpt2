@@ -57,6 +57,8 @@ CUDA_VISIBLE_DEVICES=<GPU_ID>
 python run_gpt2.py \
     --model <MODEL_NAME> \
     --enable-prefetch \
-    --enable-cudnn-benchmark
+    --enable-cudnn-benchmark \
+    --num-streams <NUM_STREAMS> \
+    --warmups <NUM_WARMUP_STEP>
 ```
 

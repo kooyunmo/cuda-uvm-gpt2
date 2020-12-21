@@ -11,8 +11,8 @@ class Prefetcher:
         else:
             for _ in range(num_prefetch_streams):
                 self.prefetch_streams.append(torch.cuda.Stream())
-        self.num_prefetch_blocks_list: List[int] = []
-        self.current_prefetch_idx: int = 0
+        self.block_counts: List[int] = []
+        self.curr_pf_idx: int = 0
 
     @contextmanager
     def record_malloc(self):
@@ -23,14 +23,17 @@ class Prefetcher:
             yield result
         finally:
             result['num_blocks'] = torch._C._cuda_disablePrefetchRecording()
-            self.num_prefetch_blocks_list.append(result["num_blocks"])
+            self.block_counts.append(result["num_blocks"])
 
     def prefetch_async(self, prefetch_stride=1):
-        num_blocks_to_prefetch = sum(self.num_prefetch_blocks_list[self.current_prefetch_idx:self.current_prefetch_idx+prefetch_stride])
-        current_prefetch_stream = self.prefetch_streams[self.current_prefetch_idx % len(self.prefetch_streams)]
+        start = self.curr_pf_idx
+        end = self.curr_pf_idx + prefetch_stride
+        num_blocks_to_prefetch = sum(self.block_counts[start:end])
+        # prefetch stream is selected in Round-Robin
+        current_prefetch_stream = self.prefetch_streams[self.curr_pf_idx % len(self.prefetch_streams)]
         torch._C._cuda_memPrefetchAsync(current_prefetch_stream._cdata, num_blocks_to_prefetch)
-        self.current_prefetch_idx += prefetch_stride
+        self.curr_pf_idx += prefetch_stride
         
-        if self.current_prefetch_idx == len(self.num_prefetch_blocks_list):
-            self.current_prefetch_idx = 0
+        if self.curr_pf_idx == len(self.block_counts):
+            self.curr_pf_idx = 0
             torch._C._cuda_clearPrefetchIdx()
